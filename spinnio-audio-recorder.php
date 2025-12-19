@@ -66,8 +66,10 @@ final class Spinnio_Audio_Recorder {
    * record to OGG on browsers that support it or handle conversion later.
    */
   public function allow_additional_mimes(array $mimes): array {
-    // WebM (often Opus audio in a WebM container from Chrome)
-    $mimes['webm'] = 'audio/webm';
+    // WebM can be reported as audio/webm (ideal) or video/webm (common sniff result),
+    // so allow both to avoid the "not allowed to upload this file type" error.
+    $mimes['webm'] = 'video/webm';
+    $mimes['weba'] = 'audio/webm';
     // OGG (Opus in an Ogg container)
     $mimes['ogg']  = 'audio/ogg';
 
