@@ -20,20 +20,45 @@
 }
 
 .sar-btn {
-  padding: 10px 14px;
+  display: inline-flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  min-width: 110px;
+  padding: 12px 14px;
   border: 1px solid #333;
-  background: #fff;
-  border-radius: 8px;
+  background: #f9f9f9;
+  border-radius: 10px;
   cursor: pointer;
+  color: #111;
+  font-weight: 600;
+  text-align: center;
+  transition: transform 120ms ease, box-shadow 120ms ease;
+}
+
+.sar-btn:hover:not([disabled]) {
+  transform: translateY(-1px);
+  box-shadow: 0 4px 10px rgba(0, 0, 0, 0.08);
 }
 
 .sar-btn[disabled] {
-  opacity: 0.5;
+  opacity: 0.55;
   cursor: not-allowed;
 }
 
 .sar-btn-secondary {
   border-color: #777;
+}
+
+.sar-btn-icon {
+  font-size: 18px;
+  line-height: 1;
+}
+
+.sar-btn-text {
+  font-size: 13px;
+  line-height: 1.1;
 }
 
 .sar-meta {
