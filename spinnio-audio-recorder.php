@@ -107,10 +107,49 @@ final class Spinnio_Audio_Recorder {
       <div class="sar-status" data-sar-status>Ready.</div>
 
       <div class="sar-controls">
-        <button type="button" class="sar-btn" data-sar-start>Record</button>
-        <button type="button" class="sar-btn" data-sar-stop disabled>Stop</button>
-        <button type="button" class="sar-btn" data-sar-upload disabled>Upload</button>
-        <button type="button" class="sar-btn sar-btn-secondary" data-sar-reset disabled>Reset</button>
+        <button
+          type="button"
+          class="sar-btn"
+          data-sar-start
+          aria-label="Start recording"
+          title="Start a new recording"
+        >
+          <span aria-hidden="true" class="sar-btn-icon">●</span>
+          <span class="sar-btn-text">Record</span>
+        </button>
+        <button
+          type="button"
+          class="sar-btn"
+          data-sar-stop
+          aria-label="Stop recording"
+          title="Stop the current recording"
+          disabled
+        >
+          <span aria-hidden="true" class="sar-btn-icon">■</span>
+          <span class="sar-btn-text">Stop</span>
+        </button>
+        <button
+          type="button"
+          class="sar-btn"
+          data-sar-upload
+          aria-label="Upload recording"
+          title="Upload the recorded audio to the Media Library"
+          disabled
+        >
+          <span aria-hidden="true" class="sar-btn-icon">⬆</span>
+          <span class="sar-btn-text">Upload</span>
+        </button>
+        <button
+          type="button"
+          class="sar-btn sar-btn-secondary"
+          data-sar-reset
+          aria-label="Reset recorder"
+          title="Clear the current recording and start over"
+          disabled
+        >
+          <span aria-hidden="true" class="sar-btn-icon">↺</span>
+          <span class="sar-btn-text">Reset</span>
+        </button>
       </div>
 
       <div class="sar-meta">
