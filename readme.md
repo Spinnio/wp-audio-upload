@@ -25,8 +25,13 @@ Minimal WordPress plugin that lets logged-in users record audio in-browser via M
   - Requires WP REST nonce header (X-WP-Nonce)
 
 ## Configuration
-You can change limits via filters (in a small must-use plugin or theme functions.php):
+Use the **Settings → Spinnio Recorder** page in wp-admin to set:
+- Maximum upload size (MB)
+- The helper text displayed under the timer on the recorder UI
+
+You can also change limits via filters (in a small must-use plugin or theme functions.php):
 
 ```php
 add_filter('spinnio_audio_recorder_max_seconds', fn() => 600); // 10 minutes
 add_filter('spinnio_audio_recorder_max_bytes', fn() => 50 * 1024 * 1024); // 50MB
+```

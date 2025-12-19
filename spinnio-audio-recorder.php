@@ -2,7 +2,7 @@
 /**
  * Plugin Name: Spinnio Audio Recorder
  * Description: Minimal logged-in-only in-browser audio recorder (MediaRecorder) that uploads to WordPress Media Library.
- * Version: 0.1.0
+ * Version: 0.2.0
  * Author: Spinnio Ventures
  * License: GPLv2 or later
  *
@@ -16,16 +16,20 @@ if (!defined('ABSPATH')) {
 }
 
 final class Spinnio_Audio_Recorder {
-  const VERSION = '0.1.0';
+  const VERSION = '0.2.0';
   const NONCE_ACTION = 'spinnio_audio_recorder_upload';
   const REST_NAMESPACE = 'spinnio-recorder/v1';
   const REST_ROUTE = '/upload';
+  const DEFAULT_MAX_BYTES = 25 * 1024 * 1024; // 25 MB
+  const DEFAULT_HINT_TEXT = 'Chrome recommended. Keep recordings reasonably short.';
 
   public function __construct() {
     add_action('init', [$this, 'register_shortcode']);
     add_action('wp_enqueue_scripts', [$this, 'register_assets']);
     add_action('rest_api_init', [$this, 'register_rest_routes']);
     add_filter('upload_mimes', [$this, 'allow_additional_mimes']);
+    add_action('admin_menu', [$this, 'register_settings_page']);
+    add_action('admin_init', [$this, 'register_settings']);
   }
 
   /**
@@ -54,6 +58,155 @@ final class Spinnio_Audio_Recorder {
       self::VERSION,
       true
     );
+  }
+
+  /**
+   * Admin settings page: menu entry.
+   */
+  public function register_settings_page(): void {
+    add_options_page(
+      'Spinnio Audio Recorder',
+      'Spinnio Recorder',
+      'manage_options',
+      'spinnio-audio-recorder',
+      [$this, 'render_settings_page']
+    );
+  }
+
+  /**
+   * Register settings and fields.
+   */
+  public function register_settings(): void {
+    register_setting(
+      'spinnio_audio_recorder',
+      'spinnio_audio_recorder_max_bytes',
+      [
+        'type' => 'integer',
+        'sanitize_callback' => [$this, 'sanitize_max_bytes'],
+        'default' => self::DEFAULT_MAX_BYTES,
+      ]
+    );
+
+    register_setting(
+      'spinnio_audio_recorder',
+      'spinnio_audio_recorder_hint_text',
+      [
+        'type' => 'string',
+        'sanitize_callback' => [$this, 'sanitize_hint_text'],
+        'default' => self::DEFAULT_HINT_TEXT,
+      ]
+    );
+
+    add_settings_section(
+      'spinnio_audio_recorder_main',
+      'Recorder Settings',
+      '__return_false',
+      'spinnio-audio-recorder'
+    );
+
+    add_settings_field(
+      'spinnio_audio_recorder_max_bytes',
+      'Max file size (MB)',
+      [$this, 'render_max_bytes_field'],
+      'spinnio-audio-recorder',
+      'spinnio_audio_recorder_main'
+    );
+
+    add_settings_field(
+      'spinnio_audio_recorder_hint_text',
+      'Helper text',
+      [$this, 'render_hint_text_field'],
+      'spinnio-audio-recorder',
+      'spinnio_audio_recorder_main'
+    );
+  }
+
+  /**
+   * Max file size field (MB input; stored as bytes).
+   */
+  public function render_max_bytes_field(): void {
+    $bytes = $this->get_max_bytes();
+    $mb = (int) max(1, ceil($bytes / (1024 * 1024)));
+    ?>
+    <input
+      type="number"
+      id="spinnio_audio_recorder_max_bytes"
+      name="spinnio_audio_recorder_max_bytes"
+      min="1"
+      step="1"
+      value="<?php echo esc_attr($mb); ?>"
+    />
+    <p class="description">Saved in megabytes. The upload endpoint also enforces this limit.</p>
+    <?php
+  }
+
+  /**
+   * Helper text field.
+   */
+  public function render_hint_text_field(): void {
+    $text = $this->get_hint_text();
+    ?>
+    <input
+      type="text"
+      id="spinnio_audio_recorder_hint_text"
+      name="spinnio_audio_recorder_hint_text"
+      class="regular-text"
+      value="<?php echo esc_attr($text); ?>"
+    />
+    <p class="description">Displayed under the timer on the recorder UI.</p>
+    <?php
+  }
+
+  /**
+   * Settings page markup.
+   */
+  public function render_settings_page(): void {
+    ?>
+    <div class="wrap">
+      <h1>Spinnio Audio Recorder</h1>
+      <form method="post" action="options.php">
+        <?php
+        settings_fields('spinnio_audio_recorder');
+        do_settings_sections('spinnio-audio-recorder');
+        submit_button();
+        ?>
+      </form>
+    </div>
+    <?php
+  }
+
+  private function sanitize_max_bytes($value): int {
+    $mb = absint($value);
+    if ($mb <= 0) {
+      return self::DEFAULT_MAX_BYTES;
+    }
+    return $mb * 1024 * 1024;
+  }
+
+  private function sanitize_hint_text($value): string {
+    $value = is_string($value) ? $value : '';
+    $value = trim($value);
+    if ($value === '') {
+      return self::DEFAULT_HINT_TEXT;
+    }
+    return sanitize_text_field($value);
+  }
+
+  private function get_max_bytes(): int {
+    $stored = get_option('spinnio_audio_recorder_max_bytes', self::DEFAULT_MAX_BYTES);
+    $bytes = (int) $stored;
+    if ($bytes <= 0) {
+      return self::DEFAULT_MAX_BYTES;
+    }
+    return $bytes;
+  }
+
+  private function get_hint_text(): string {
+    $stored = get_option('spinnio_audio_recorder_hint_text', self::DEFAULT_HINT_TEXT);
+    if (!is_string($stored) || trim($stored) === '') {
+      return self::DEFAULT_HINT_TEXT;
+    }
+    return $stored;
   }
 
   /**
@@ -92,12 +245,13 @@ final class Spinnio_Audio_Recorder {
     wp_enqueue_script('spinnio-audio-recorder');
 
     // Config passed to JS.
+    $max_bytes = $this->get_max_bytes();
     $config = [
       'restUrl' => esc_url_raw(rest_url(self::REST_NAMESPACE . self::REST_ROUTE)),
       'nonce' => wp_create_nonce('wp_rest'),
       'uploadNonce' => wp_create_nonce(self::NONCE_ACTION),
       'maxSeconds' => (int) apply_filters('spinnio_audio_recorder_max_seconds', 300), // default 5 minutes
-      'maxBytes' => (int) apply_filters('spinnio_audio_recorder_max_bytes', 25 * 1024 * 1024), // default 25MB
+      'maxBytes' => (int) apply_filters('spinnio_audio_recorder_max_bytes', $max_bytes),
     ];
 
     wp_localize_script('spinnio-audio-recorder', 'SpinnioAudioRecorder', $config);
@@ -156,7 +310,7 @@ final class Spinnio_Audio_Recorder {
 
       <div class="sar-meta">
         <span class="sar-timer" data-sar-timer>00:00</span>
-        <span class="sar-hint">Chrome recommended. Keep recordings reasonably short.</span>
+        <span class="sar-hint"><?php echo esc_html($this->get_hint_text()); ?></span>
       </div>
 
       <div class="sar-preview">
@@ -225,7 +379,7 @@ final class Spinnio_Audio_Recorder {
    */
   public function handle_upload(\WP_REST_Request $request) {
     // Enforce size limits in PHP as a backstop.
-    $max_bytes = (int) apply_filters('spinnio_audio_recorder_max_bytes', 25 * 1024 * 1024);
+    $max_bytes = (int) apply_filters('spinnio_audio_recorder_max_bytes', $this->get_max_bytes());
 
     if (empty($_FILES['file'])) {
       return new \WP_REST_Response([
