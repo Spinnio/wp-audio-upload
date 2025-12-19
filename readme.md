@@ -1,4 +1,4 @@
-# Spinnio Audio Recorder (POC)
+# Spinnio Audio Recorder
 
 Minimal WordPress plugin that lets logged-in users record audio in-browser via MediaRecorder and uploads it to the WordPress Media Library.
 
