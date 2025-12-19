@@ -1,0 +1,73 @@
+/* Minimal styling for the recorder UI. Keep it plain and functional. */
+
+.sar-wrap {
+  border: 1px solid #d0d0d0;
+  padding: 14px;
+  border-radius: 10px;
+  max-width: 680px;
+}
+
+.sar-status {
+  font-size: 14px;
+  margin-bottom: 10px;
+}
+
+.sar-controls {
+  display: flex;
+  gap: 10px;
+  flex-wrap: wrap;
+  margin-bottom: 10px;
+}
+
+.sar-btn {
+  padding: 10px 14px;
+  border: 1px solid #333;
+  background: #fff;
+  border-radius: 8px;
+  cursor: pointer;
+}
+
+.sar-btn[disabled] {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.sar-btn-secondary {
+  border-color: #777;
+}
+
+.sar-meta {
+  display: flex;
+  gap: 12px;
+  align-items: center;
+  margin-bottom: 10px;
+  flex-wrap: wrap;
+}
+
+.sar-timer {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
+  font-size: 14px;
+  padding: 4px 8px;
+  border: 1px solid #ddd;
+  border-radius: 6px;
+}
+
+.sar-hint {
+  font-size: 12px;
+  color: #555;
+}
+
+.sar-preview audio {
+  width: 100%;
+  margin-top: 6px;
+}
+
+.sar-result {
+  margin-top: 12px;
+  padding-top: 10px;
+  border-top: 1px solid #e6e6e6;
+}
+
+.sar-result a {
+  word-break: break-all;
+}
