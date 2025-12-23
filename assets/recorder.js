@@ -2,16 +2,18 @@
  * Spinnio Audio Recorder
  * Minimal MediaRecorder UI + upload to WP REST endpoint.
  *
- * Assumptions:
- * - Logged-in user (UI rendered only when logged in).
- * - Chrome-first.
- *
  * Server contract:
  * POST restUrl (multipart/form-data)
  * - file: Blob
  * - filename: string
  * - upload_nonce: string
- * Returns: { ok: true, attachment_id, url } or { ok:false, error }
+ * - consumer (optional)
+ * - reference_id (optional)
+ * - requested_storage (optional)
+ * - folder (optional)
+ *
+ * Returns:
+ * { ok: true, attachment_id, url, storage } or { ok:false, error }
  */
 
 (function () {
@@ -34,7 +36,6 @@
   }
 
   function pickMimeType() {
-    // Chrome generally supports audio/webm;codecs=opus
     const preferred = [
       "audio/webm;codecs=opus",
       "audio/webm",
@@ -46,6 +47,16 @@
       if (MediaRecorder.isTypeSupported(t)) return t;
     }
     return "";
+  }
+
+  function getContextFromRoot(root) {
+    // These come from PHP as data-sar-*
+    return {
+      consumer: root.getAttribute("data-sar-consumer") || "",
+      reference_id: root.getAttribute("data-sar-reference-id") || "",
+      requested_storage: root.getAttribute("data-sar-requested-storage") || "",
+      folder: root.getAttribute("data-sar-folder") || "",
+    };
   }
 
   async function initRecorderUI(root) {
@@ -126,7 +137,6 @@
       setStatus("Requesting microphone permission...");
       const mimeType = pickMimeType();
 
-      // Request mic
       stream = await navigator.mediaDevices.getUserMedia({ audio: true });
 
       chunks = [];
@@ -135,7 +145,6 @@
       try {
         recorder = mimeType ? new MediaRecorder(stream, { mimeType }) : new MediaRecorder(stream);
       } catch (e) {
-        // If mimeType fails, retry without it.
         recorder = new MediaRecorder(stream);
       }
 
@@ -171,7 +180,6 @@
           timer = null;
         }
 
-        // Release mic
         if (stream) {
           stream.getTracks().forEach((t) => t.stop());
           stream = null;
@@ -189,7 +197,6 @@
           return;
         }
 
-        // Preview
         if (objectUrl) URL.revokeObjectURL(objectUrl);
         objectUrl = URL.createObjectURL(blob);
         audioEl.src = objectUrl;
@@ -212,7 +219,6 @@
           recorder.stop();
         }
       } catch (e) {
-        // Fall back cleanup
         setStatus("Failed to stop recording cleanly.");
       } finally {
         stopBtn.disabled = true;
@@ -221,7 +227,6 @@
 
     function buildFilename() {
       const ts = new Date().toISOString().replace(/[:.]/g, "-");
-      // Choose extension from blob type
       const t = blob && blob.type ? blob.type : "";
       let ext = "webm";
       if (t.includes("ogg")) ext = "ogg";
@@ -240,15 +245,24 @@
       startBtn.disabled = true;
       resetBtn.disabled = true;
 
+      const context = getContextFromRoot(root);
+
       const form = new FormData();
-      form.append("file", blob, buildFilename());
-      form.append("filename", buildFilename());
+      const filename = buildFilename();
+
+      form.append("file", blob, filename);
+      form.append("filename", filename);
       form.append("upload_nonce", cfg.uploadNonce);
+
+      // Optional context (only append if present)
+      if (context.consumer) form.append("consumer", context.consumer);
+      if (context.reference_id) form.append("reference_id", context.reference_id);
+      if (context.requested_storage) form.append("requested_storage", context.requested_storage);
+      if (context.folder) form.append("folder", context.folder);
 
       const resp = await fetch(cfg.restUrl, {
         method: "POST",
         headers: {
-          // WordPress REST nonce
           "X-WP-Nonce": cfg.nonce,
         },
         body: form,
@@ -266,22 +280,27 @@
         return;
       }
 
-      // Success
-      setStatus("Saved to Media Library.");
+      // Success (back-compat: attachment_id + url may be null for external storage)
+      setStatus("Saved.");
       resultEl.style.display = "block";
-      urlEl.href = data.url;
-      urlEl.textContent = data.url;
-      idEl.textContent = String(data.attachment_id);
 
-      // Keep reset available to record another one
+      if (data.url) {
+        urlEl.href = data.url;
+        urlEl.textContent = data.url;
+      } else {
+        urlEl.href = "#";
+        urlEl.textContent = "No URL returned";
+      }
+
+      idEl.textContent = data.attachment_id ? String(data.attachment_id) : "—";
+
       startBtn.disabled = false;
       resetBtn.disabled = false;
       uploadBtn.disabled = true;
     }
 
-    // Wire buttons
     startBtn.addEventListener("click", () => {
-      resetAll(); // reset prior state, but keep UI present
+      resetAll();
       startRecording().catch((err) => {
         setStatus(err && err.message ? err.message : "Failed to start recording.");
         startBtn.disabled = false;
@@ -290,6 +309,7 @@
     });
 
     stopBtn.addEventListener("click", () => stopRecording());
+
     uploadBtn.addEventListener("click", () => uploadRecording().catch((err) => {
       setStatus(err && err.message ? err.message : "Upload error.");
       uploadBtn.disabled = false;
@@ -299,7 +319,6 @@
 
     resetBtn.addEventListener("click", () => resetAll());
 
-    // Initial state
     resetAll();
   }
 
