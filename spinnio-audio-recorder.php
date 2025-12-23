@@ -481,9 +481,12 @@ final class Spinnio_Audio_Recorder {
       'tmp_name' => $tmp_path,
     ];
 
-    $attachment_id = media_handle_sideload($file_array, 0, [
-      'post_title' => $this->default_attachment_title(),
-    ]);
+    $desc = ''; // or a string like 'Voice recording'
+    $post_data = [
+      'post_title' => pathinfo($file_array['name'], PATHINFO_FILENAME),
+    ];
+
+$attachment_id = media_handle_sideload($file_array, 0, $desc, $post_data);
 
     if (is_wp_error($attachment_id)) {
       if (file_exists($tmp_path)) @unlink($tmp_path);
