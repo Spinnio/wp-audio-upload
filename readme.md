@@ -46,6 +46,7 @@ echo spinnio_audio_recorder_render([
   'requested_storage' => 'bunny',
   'folder' => 'voice-memos',
 ]);
+```
 
 ## Shortcode context attributes
 
