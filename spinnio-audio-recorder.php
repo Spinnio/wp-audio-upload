@@ -1,8 +1,8 @@
 <?php
 /**
  * Plugin Name: Spinnio Audio Recorder
- * Description: Minimal logged-in-only in-browser audio recorder (MediaRecorder) that uploads to WordPress Media Library.
- * Version: 0.2.0
+ * Description: Minimal logged-in-only in-browser audio recorder (MediaRecorder) that uploads to WordPress Media Library (or custom storage via hook).
+ * Version: 0.3.0
  * Author: Spinnio Ventures
  * License: GPLv2 or later
  *
@@ -16,7 +16,7 @@ if (!defined('ABSPATH')) {
 }
 
 final class Spinnio_Audio_Recorder {
-  const VERSION = '0.2.0';
+  const VERSION = '0.3.0';
   const NONCE_ACTION = 'spinnio_audio_recorder_upload';
   const REST_NAMESPACE = 'spinnio-recorder/v1';
   const REST_ROUTE = '/upload';
@@ -211,36 +211,29 @@ final class Spinnio_Audio_Recorder {
 
   /**
    * Allow WebM/OGG audio uploads if needed.
-   *
-   * WordPress typically allows ogg/wav/mp3/m4a. WebM may not be allowed in some setups
-   * or may be treated as video. This filter makes it acceptable in the Media Library.
-   *
-   * If you prefer to avoid changing global allowed mimes, you can remove this filter and
-   * record to OGG on browsers that support it or handle conversion later.
    */
   public function allow_additional_mimes(array $mimes): array {
-    // WebM can be reported as audio/webm (ideal) or video/webm (common sniff result),
-    // so allow both to avoid the "not allowed to upload this file type" error.
     $mimes['webm'] = 'video/webm';
     $mimes['weba'] = 'audio/webm';
-    // OGG (Opus in an Ogg container)
     $mimes['ogg']  = 'audio/ogg';
-
     return $mimes;
   }
 
   /**
-   * Render recorder UI.
+   * Public render API for other plugins/themes.
    *
-   * Logged-in users only: if not logged in, show a simple message.
-   * This is intentionally minimal for a POC.
+   * @param array $args Optional context args:
+   *  - consumer (string)
+   *  - reference_id (string|int)
+   *  - requested_storage (string) e.g., "wordpress" or "bunny"
+   *  - folder (string)
    */
-  public function render_shortcode($atts = []): string {
+  public function render_recorder(array $args = []): string {
     if (!is_user_logged_in()) {
       return '<div class="sar-wrap"><p>You must be logged in to record audio.</p></div>';
     }
 
-    // Enqueue assets only when shortcode renders.
+    // Enqueue assets only when UI renders.
     wp_enqueue_style('spinnio-audio-recorder');
     wp_enqueue_script('spinnio-audio-recorder');
 
@@ -253,13 +246,34 @@ final class Spinnio_Audio_Recorder {
       'maxSeconds' => (int) apply_filters('spinnio_audio_recorder_max_seconds', 300), // default 5 minutes
       'maxBytes' => (int) apply_filters('spinnio_audio_recorder_max_bytes', $max_bytes),
     ];
-
     wp_localize_script('spinnio-audio-recorder', 'SpinnioAudioRecorder', $config);
 
-    // UI container
+    $defaults = [
+      'consumer' => '',
+      'reference_id' => '',
+      'requested_storage' => '',
+      'folder' => '',
+    ];
+    $args = wp_parse_args($args, $defaults);
+
+    $data = [
+      'data-sar' => '1',
+    ];
+
+    // Context data-* attributes (forwarded to server via JS -> FormData).
+    if (!empty($args['consumer'])) $data['data-sar-consumer'] = (string) $args['consumer'];
+    if (!empty($args['reference_id'])) $data['data-sar-reference-id'] = (string) $args['reference_id'];
+    if (!empty($args['requested_storage'])) $data['data-sar-requested-storage'] = (string) $args['requested_storage'];
+    if (!empty($args['folder'])) $data['data-sar-folder'] = (string) $args['folder'];
+
+    $attr = '';
+    foreach ($data as $k => $v) {
+      $attr .= ' ' . esc_attr($k) . '="' . esc_attr($v) . '"';
+    }
+
     ob_start();
     ?>
-    <div class="sar-wrap" data-sar="1">
+    <div class="sar-wrap"<?php echo $attr; ?>>
       <div class="sar-status" data-sar-status>Ready.</div>
 
       <div class="sar-controls">
@@ -289,7 +303,7 @@ final class Spinnio_Audio_Recorder {
           class="sar-btn"
           data-sar-upload
           aria-label="Upload recording"
-          title="Upload the recorded audio to the Media Library"
+          title="Upload the recorded audio"
           disabled
         >
           <span aria-hidden="true" class="sar-btn-icon">⬆</span>
@@ -327,10 +341,24 @@ final class Spinnio_Audio_Recorder {
   }
 
   /**
-   * Register REST routes.
+   * Shortcode handler (wraps render_recorder).
    *
-   * We create a dedicated upload endpoint instead of using /wp/v2/media to keep the
-   * implementation explicit and easy to customize later.
+   * Supported attrs:
+   * [spinnio_audio_recorder consumer="" reference_id="" requested_storage="" folder=""]
+   */
+  public function render_shortcode($atts = []): string {
+    $atts = shortcode_atts([
+      'consumer' => '',
+      'reference_id' => '',
+      'requested_storage' => '',
+      'folder' => '',
+    ], (array) $atts, 'spinnio_audio_recorder');
+
+    return $this->render_recorder($atts);
+  }
+
+  /**
+   * Register REST routes.
    */
   public function register_rest_routes(): void {
     register_rest_route(self::REST_NAMESPACE, self::REST_ROUTE, [
@@ -338,47 +366,46 @@ final class Spinnio_Audio_Recorder {
       'callback' => [$this, 'handle_upload'],
       'permission_callback' => [$this, 'permissions_check'],
       'args' => [
-        // upload_nonce is separate from wp_rest nonce; this is an extra guard you can remove if desired.
         'upload_nonce' => [
           'required' => true,
           'type' => 'string',
         ],
+        // Optional context fields.
+        'consumer' => ['required' => false, 'type' => 'string'],
+        'reference_id' => ['required' => false, 'type' => 'string'],
+        'requested_storage' => ['required' => false, 'type' => 'string'],
+        'folder' => ['required' => false, 'type' => 'string'],
       ],
     ]);
   }
 
-  /**
-   * Permissions for upload:
-   * - Must be logged in
-   * - Must have upload_files capability (typical for Authors/Editors/Admins)
-   */
   public function permissions_check(\WP_REST_Request $request): bool {
-    if (!is_user_logged_in()) {
-      return false;
-    }
-    if (!current_user_can('upload_files')) {
-      return false;
-    }
+    if (!is_user_logged_in()) return false;
+    if (!current_user_can('upload_files')) return false;
 
-    // Additional nonce check for this specific action.
     $upload_nonce = (string) $request->get_param('upload_nonce');
-    if (!wp_verify_nonce($upload_nonce, self::NONCE_ACTION)) {
-      return false;
-    }
+    if (!wp_verify_nonce($upload_nonce, self::NONCE_ACTION)) return false;
 
     return true;
   }
 
   /**
-   * Handle audio upload to Media Library.
+   * Handle audio upload.
    *
-   * Expects multipart/form-data with:
-   * - file (Blob)
-   * - filename (optional; but recommended)
-   * - upload_nonce (required)
+   * Default: save to WP Media Library.
+   * Extensible: other plugins can intercept and store elsewhere (e.g., Bunny)
+   * via filter: spinnio_audio_recorder_handle_storage.
+   *
+   * Filter signature:
+   *  apply_filters('spinnio_audio_recorder_handle_storage', null, $tmp_path, $context, $file_meta)
+   * Return:
+   *  - null to fall back to WP Media Library
+   *  - array to indicate storage was handled externally
+   *
+   * Action after save:
+   *  do_action('spinnio_audio_recorder_saved', $storage_result, $context)
    */
   public function handle_upload(\WP_REST_Request $request) {
-    // Enforce size limits in PHP as a backstop.
     $max_bytes = (int) apply_filters('spinnio_audio_recorder_max_bytes', $this->get_max_bytes());
 
     if (empty($_FILES['file'])) {
@@ -395,22 +422,72 @@ final class Spinnio_Audio_Recorder {
       ], 413);
     }
 
-    // WordPress media functions
+    $context = [
+      'consumer' => sanitize_text_field((string) $request->get_param('consumer')),
+      'reference_id' => sanitize_text_field((string) $request->get_param('reference_id')),
+      'requested_storage' => sanitize_text_field((string) $request->get_param('requested_storage')),
+      'folder' => sanitize_text_field((string) $request->get_param('folder')),
+    ];
+
     require_once ABSPATH . 'wp-admin/includes/file.php';
     require_once ABSPATH . 'wp-admin/includes/media.php';
     require_once ABSPATH . 'wp-admin/includes/image.php';
 
-    // Optional: if client provides a filename, we set it here to help WP detect mime/ext.
+    // If client provides a filename, set it to help mime/ext detection.
     if (!empty($_POST['filename']) && is_string($_POST['filename'])) {
       $_FILES['file']['name'] = sanitize_file_name(wp_unslash($_POST['filename']));
     }
 
-    // Use media_handle_upload to move file into uploads, create attachment, generate metadata.
-    $attachment_id = media_handle_upload('file', 0, [
+    $original = $_FILES['file'];
+
+    // Move upload to our own temp path so we can (a) hand to external storage safely, and
+    // (b) use media_handle_sideload without relying on the original PHP tmp file lifecycle.
+    $tmp_path = wp_tempnam($original['name'] ?? 'recording.webm');
+    if (!$tmp_path || !move_uploaded_file($original['tmp_name'], $tmp_path)) {
+      return new \WP_REST_Response([
+        'ok' => false,
+        'error' => 'Unable to persist uploaded file to a temp location.',
+      ], 500);
+    }
+
+    $file_meta = [
+      'name' => sanitize_file_name($original['name'] ?? 'recording.webm'),
+      'type' => (string) ($original['type'] ?? ''),
+      'size' => (int) ($original['size'] ?? 0),
+    ];
+
+    // Give other plugins a chance to store externally (e.g., Bunny).
+    $storage_result = apply_filters('spinnio_audio_recorder_handle_storage', null, $tmp_path, $context, $file_meta);
+
+    if (is_array($storage_result)) {
+      // External storage handled it; clean up temp file.
+      if (file_exists($tmp_path)) @unlink($tmp_path);
+
+      // Fire post-save hook.
+      do_action('spinnio_audio_recorder_saved', $storage_result, $context);
+
+      return new \WP_REST_Response([
+        'ok' => true,
+        // Back-compat keys (may be absent for external storage)
+        'attachment_id' => $storage_result['attachment_id'] ?? null,
+        'url' => $storage_result['url'] ?? null,
+        'storage' => $storage_result,
+      ], 200);
+    }
+
+    // Default: store in WP Media Library.
+    $file_array = [
+      'name' => sanitize_file_name($original['name'] ?? 'recording.webm'),
+      'tmp_name' => $tmp_path,
+    ];
+
+    $attachment_id = media_handle_sideload($file_array, 0, [
       'post_title' => $this->default_attachment_title(),
     ]);
 
     if (is_wp_error($attachment_id)) {
+      if (file_exists($tmp_path)) @unlink($tmp_path);
+
       return new \WP_REST_Response([
         'ok' => false,
         'error' => $attachment_id->get_error_message(),
@@ -419,10 +496,19 @@ final class Spinnio_Audio_Recorder {
 
     $url = wp_get_attachment_url($attachment_id);
 
+    $storage_result = [
+      'provider' => 'wordpress',
+      'attachment_id' => $attachment_id,
+      'url' => $url,
+    ];
+
+    do_action('spinnio_audio_recorder_saved', $storage_result, $context);
+
     return new \WP_REST_Response([
       'ok' => true,
       'attachment_id' => $attachment_id,
       'url' => $url,
+      'storage' => $storage_result,
     ], 200);
   }
 
@@ -433,4 +519,23 @@ final class Spinnio_Audio_Recorder {
   }
 }
 
-new Spinnio_Audio_Recorder();
+// Instantiate and expose a global instance for the helper function.
+$GLOBALS['spinnio_audio_recorder'] = new Spinnio_Audio_Recorder();
+
+/**
+ * Helper function for other plugins/themes to render the recorder UI.
+ *
+ * Usage:
+ *   echo spinnio_audio_recorder_render([
+ *     'consumer' => 'my-plugin',
+ *     'reference_id' => 123,
+ *     'requested_storage' => 'bunny',
+ *     'folder' => 'voice-memos',
+ *   ]);
+ */
+function spinnio_audio_recorder_render(array $args = []): string {
+  if (!isset($GLOBALS['spinnio_audio_recorder']) || !($GLOBALS['spinnio_audio_recorder'] instanceof Spinnio_Audio_Recorder)) {
+    return '';
+  }
+  return $GLOBALS['spinnio_audio_recorder']->render_recorder($args);
+}
